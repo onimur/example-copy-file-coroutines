@@ -11,6 +11,10 @@ import kotlinx.android.synthetic.main.activity_main.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.Dispatchers.IO
 import kotlinx.coroutines.Dispatchers.Main
+import kotlinx.coroutines.flow.asFlow
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.flatMapMerge
+import kotlinx.coroutines.flow.flow
 import java.io.File
 import java.io.FileOutputStream
 
@@ -38,7 +42,71 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    @FlowPreview
     fun onClickStartTask(view: View) {
+        val listNewPath = mutableListOf<String>()
+        progressBar.visibility = VISIBLE
+        CoroutineScope(Main + job).launch {
+            try {
+                listUri.asFlow()
+                    .flatMapMerge(4) {
+                        flow { emit(processUri(it)) }
+                    }.collect { handleResult(it, listNewPath) }
+
+            } catch (e: CancellationException) {
+                println(e.message)
+            } finally {
+                myAdapter.updateListChanged(listNewPath)
+                progressBar.visibility = GONE
+            }
+        }
+    }
+
+    private suspend fun processUri(uri: Uri): String = withContext(IO) {
+        println("Init async for file")
+        //path to file temp
+        val pathFileTemp =
+            "${getExternalFilesDir("Temp").toString()}/${uri.lastPathSegment}"
+        val file = File(pathFileTemp)
+
+        val inputStream = contentResolver.openInputStream(uri)
+        inputStream?.use { input ->
+
+            FileOutputStream(file).use { output ->
+                val buffer = ByteArray(1024)
+                var read: Int = input.read(buffer)
+                while (read != -1) {
+                    //check the job is active
+                    yield()
+                    try {
+                        delay(20)
+                        output.write(buffer, 0, read)
+                        read = input.read(buffer)
+                    } catch (e: CancellationException) {
+                        println("task is canceled and ${file.name} deleted")
+                        file.deleteRecursively()
+                    }
+                }
+            }
+        }
+        //If completed then it returns the new path.
+        println("The ${file.name} is Complete")
+        return@withContext pathFileTemp
+    }
+
+    private fun handleResult(result: String, listNewPath: MutableList<String>) {
+        listNewPath.add(result)
+    }
+
+    fun onClickCancelTask(view: View) {
+        if (job.isActive) {
+            job.cancelChildren()
+            println("Cancel children")
+        }
+    }
+
+    /*   //Old button action
+        fun onClickStartTask(view: View) {
         var listNewPath = emptyList<String>()
         CoroutineScope(Main + job).launch {
             try {
@@ -49,7 +117,7 @@ class MainActivity : AppCompatActivity() {
                 withContext(IO) {
                     listNewPath = listUri.mapIndexed { index, uri ->
                         async {
-                            println("Init async for file${index+1}")
+                            println("Init async for file${index + 1}")
                             //path to file temp
                             val pathFileTemp =
                                 "${getExternalFilesDir("Temp").toString()}/${uri.lastPathSegment}"
@@ -88,15 +156,6 @@ class MainActivity : AppCompatActivity() {
                 myAdapter.updateListChanged(listNewPath)
                 //
             }
-
-
         }
-    }
-
-    fun onClickCancelTask(view: View) {
-        if (job.isActive) {
-            job.cancelChildren()
-            println("Cancel children")
-        }
-    }
+    }*/
 }
