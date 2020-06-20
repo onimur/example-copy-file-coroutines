@@ -76,9 +76,9 @@ class MainActivity : AppCompatActivity() {
                 val buffer = ByteArray(1024)
                 var read: Int = input.read(buffer)
                 while (read != -1) {
-                    //check the job is active
-                    yield()
                     try {
+                        //check the job is active
+                        yield()
                         delay(20)
                         output.write(buffer, 0, read)
                         read = input.read(buffer)
