@@ -10,19 +10,15 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import kotlinx.android.synthetic.main.activity_main.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.Dispatchers.IO
-import kotlinx.coroutines.Dispatchers.Main
-import kotlinx.coroutines.flow.asFlow
-import kotlinx.coroutines.flow.collect
-import kotlinx.coroutines.flow.flatMapMerge
-import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.*
 import java.io.File
 import java.io.FileOutputStream
 
 
-class MainActivity : AppCompatActivity() {
+class MainActivity : AppCompatActivity(), CoroutineScope by MainScope() {
 
     private val listUri = mutableListOf<Uri>()
-    private val job = Job()
+    private var job: Job? = null
     private val myAdapter = MyAdapter(mutableListOf())
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -46,52 +42,67 @@ class MainActivity : AppCompatActivity() {
     fun onClickStartTask(view: View) {
         val listNewPath = mutableListOf<String>()
         progressBar.visibility = VISIBLE
-        CoroutineScope(Main + job).launch {
+        job = launch {
             try {
-                listUri.asFlow()
+                listUri
+                    .asFlow()
                     .flatMapMerge(4) {
                         flow { emit(processUri(it)) }
+                            .flowOn(IO)
                     }.collect { handleResult(it, listNewPath) }
 
-            } catch (e: CancellationException) {
+            } catch (e: Exception) {
                 println(e.message)
             } finally {
-                myAdapter.updateListChanged(listNewPath)
-                progressBar.visibility = GONE
+                println("MainScope isActive: $isActive")
+                println(
+                    "Job isActive: ${job?.isActive}" +
+                            "\nisCompleted: ${job?.isCompleted}" +
+                            "\nisCancelled: ${job?.isCancelled}"
+                )
+                if (isActive) {
+                    //update UI
+                    myAdapter.updateListChanged(listNewPath)
+                    progressBar.visibility = GONE
+                } else {
+                    //view is destroyed
+                }
+
             }
         }
     }
 
-    private suspend fun processUri(uri: Uri): String = withContext(IO) {
+    private fun processUri(uri: Uri): String {
         println("Init async for file")
         //path to file temp
         val pathFileTemp =
             "${getExternalFilesDir("Temp").toString()}/${uri.lastPathSegment}"
         val file = File(pathFileTemp)
 
-        val inputStream = contentResolver.openInputStream(uri)
-        inputStream?.use { input ->
+        try {
+            val inputStream = contentResolver.openInputStream(uri)
+            inputStream?.use { input ->
 
-            FileOutputStream(file).use { output ->
-                val buffer = ByteArray(1024)
-                var read: Int = input.read(buffer)
-                while (read != -1) {
-                    try {
+                FileOutputStream(file).use { output ->
+                    val buffer = ByteArray(1024)
+                    var read: Int = input.read(buffer)
+                    while (read != -1) {
                         //check the job is active
-                        yield()
-                        delay(20)
+                        job?.ensureActive()
+                        runBlocking { delay(20) }
                         output.write(buffer, 0, read)
                         read = input.read(buffer)
-                    } catch (e: CancellationException) {
-                        println("task is canceled and ${file.name} deleted")
-                        file.deleteRecursively()
                     }
                 }
             }
+        } catch (e: Exception) {
+            println("${e.message} - ${file.name} deleted")
+            file.deleteRecursively()
+            throw e
         }
         //If completed then it returns the new path.
         println("The ${file.name} is Complete")
-        return@withContext pathFileTemp
+        return pathFileTemp
     }
 
     private fun handleResult(result: String, listNewPath: MutableList<String>) {
@@ -99,10 +110,13 @@ class MainActivity : AppCompatActivity() {
     }
 
     fun onClickCancelTask(view: View) {
-        if (job.isActive) {
-            job.cancelChildren()
-            println("Cancel children")
-        }
+        job?.cancel()
+        println("Cancel the Job")
+    }
+
+    override fun onDestroy() {
+        cancel()
+        super.onDestroy()
     }
 
     /*   //Old button action
