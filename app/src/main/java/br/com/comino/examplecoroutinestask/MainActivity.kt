@@ -15,9 +15,10 @@ import java.io.File
 import java.io.FileOutputStream
 
 
-class MainActivity : AppCompatActivity(), CoroutineScope by MainScope() {
+class MainActivity : AppCompatActivity() {
 
     private val listUri = mutableListOf<Uri>()
+    private val mainScope = MainScope()
     private var job: Job? = null
     private val myAdapter = MyAdapter(mutableListOf())
 
@@ -42,7 +43,7 @@ class MainActivity : AppCompatActivity(), CoroutineScope by MainScope() {
     fun onClickStartTask(view: View) {
         val listNewPath = mutableListOf<String>()
         progressBar.visibility = VISIBLE
-        job = launch {
+        job = mainScope.launch {
             try {
                 listUri
                     .asFlow()
@@ -54,13 +55,13 @@ class MainActivity : AppCompatActivity(), CoroutineScope by MainScope() {
             } catch (e: Exception) {
                 println(e.message)
             } finally {
-                println("MainScope isActive: $isActive")
+                println("MainScope isActive: ${mainScope.isActive}")
                 println(
                     "Job isActive: ${job?.isActive}" +
                             "\nisCompleted: ${job?.isCompleted}" +
                             "\nisCancelled: ${job?.isCancelled}"
                 )
-                if (isActive) {
+                if (mainScope.isActive) {
                     //update UI
                     myAdapter.updateListChanged(listNewPath)
                     progressBar.visibility = GONE
@@ -115,7 +116,7 @@ class MainActivity : AppCompatActivity(), CoroutineScope by MainScope() {
     }
 
     override fun onDestroy() {
-        cancel()
+        mainScope.cancel()
         super.onDestroy()
     }
 
